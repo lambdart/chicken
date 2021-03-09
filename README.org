@@ -1,0 +1,123 @@
+#+AUTHOR: lambdart
+#+EMAIL: lambdart@protonmail.com
+#+KEYWORDS: readme, emacs, elisp, chicken, scheme, package
+#+LANGUAGE: en
+#+PROPERTY: header-args :tangle no
+
+* Introduction
+
+  From Masteringemacs:
+
+  One of the hallmarks of Emacs is its ability to interface with
+  external processes and add to the user experience with the full
+  coterie of Emacs functionality like syntax highlighting, macros,
+  command history, and so on. This functionality has been in Emacs
+  since time immemorial, yet few people make their own command
+  interpreters – also known as comint – in Emacs, fearing that it is
+  either really difficult or not possible.
+
+  It’s not surprising people feel this way when you consider how
+  woefully underdocumented this functionality is; the few, scattered
+  references to comint “mode” reveal little, and as a hacker you are
+  forced to use the source, Luke.
+
+  - https://www.masteringemacs.org/article/comint-writing-command-interpreter
+
+  So, this is a simple Chicken Scheme *REPL* support for *Emacs* that can
+  help in a range of tasks related in the development of Chicken
+  Scheme code.
+
+* Version
+
+  - Alpha: 0.0.2 (Experimental)
+
+* Dependencies
+
+** Unix
+
+   - csi
+
+** Elisp
+
+  - scheme
+  - comint
+  - subr-x
+
+* Tested on
+
+  | Emacs   | 27.1 | 28.0 |
+  | FreeBSD | 12.1 | 12.2 |
+  | OpenBSD |  6.7 | 6.8  |
+
+* Installation
+** Manually
+
+   Clone =chicken= repository to an arbitrary location:
+
+   #+BEGIN_SRC sh
+
+   $ git clone https://github.com/lambdart/chicken ~/.emacs.d/site-elisp/chicken
+
+   #+END_SRC
+
+   Add =chicken= directory to =load-path= in your
+   Emacs initialization file (~init.el~) and load it.
+
+   #+BEGIN_SRC emacs-lisp
+
+   ;; add to load-path
+   (add-to-list 'load-path "/replace/me/to/chicken/full/path")
+
+   ;; load chicken feature
+   (require 'chicken nil t)
+
+   #+END_SRC
+
+   - Note: For a more dynamic approach:
+     - =M-x load-file RET=
+     - =M-x load-library RET chicken RET=
+
+** Compile
+
+   * Note: Optional (recommended).
+
+   To compile the files to the =Elisp= byte-compiled representation:
+
+   #+BEGIN_SRC sh
+
+   [at-chicken-root-directory]$ gmake
+
+   #+END_SRC
+
+* Usage
+
+  - M-x chicken-mode RET
+
+    When you evaluate some expression the interpreter will be setup
+    automatically with the help of the function `make-comint'.
+
+** Commands
+
+* Customize
+
+  * Note: To see all the options from =Emacs= directly, and to customize it,
+    just type: =M-x customize-group RET chicken RET=.
+
+* Commands
+* References
+
+  - https://wiki.call-cc.org
+  - https://wiki.call-cc.org/emacs#using-chicken-with-emacs
+
+* LICENSE
+  MIT
+
+* EOF
+
+  #+BEGIN_SRC
+  Reality is no a hack you're forced to deal with to solbe your
+  abstract, theorical problem.
+
+  Reality is the actual problem.
+  #+END_SRC
+  | Mike Acton  |
