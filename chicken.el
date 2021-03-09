@@ -162,10 +162,11 @@ considered a Chicken source file by `chicken-load-file'."
       chicken-debug-buffer
     (let ((buffer (get-buffer-create chicken-debug-buffer-name)))
       (with-current-buffer buffer
-        ;; enable scheme-mode if available
-        (and (require 'scheme-mode nil t)
+        ;; enable scheme-mode if available and chicken-mode
+        (and (require 'scheme nil t)
              (fboundp 'scheme-mode)
-             (scheme-mode))
+             (scheme-mode)
+             (chicken-mode))
         ;; change read-only property (locally)
         (setq-local buffer-read-only t))
       ;; cache and return the debug buffer
