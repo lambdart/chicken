@@ -356,7 +356,7 @@ This function will be called by `chicken-mode-hook.'"
   ;; kill the buffer
   (kill-buffer chicken-proc-buffer))
 
-(defun chicken-eval-definition ()
+(defun chicken-eval-define ()
   "Send definition to the Chicken comint process."
   (interactive)
   (save-excursion
@@ -559,6 +559,24 @@ If PROMPT is non-nil use it as the read prompt."
       (setq str (concat str "\\|" (regexp-quote (symbol-name (car keyword))) "\\>")))
     (concat str "\\)")))
 
+(defvar chicken-mode-map
+  (let ((map (keymap-parent scheme-mode-map)))
+    (define-key map (kbd "C-M-x")   #'chicken-eval-define) ; Gnu convention
+    (define-key map (kbd "C-c C-e") #'chicken-eval-last-sexp)
+    (define-key map (kbd "C-x C-e") #'chicken-eval-last-sexp)  ; Gnu convention
+    (define-key map (kbd "C-c C-b") #'chicken-eval-buffer)
+    (define-key map (kbd "C-c C-r") #'chicken-eval-region)
+    (define-key map (kbd "C-c C-l") #'chicken-load-file)
+    (define-key map (kbd "C-c C-f") #'chicken-load-current-file)
+    (define-key map (kbd "C-c C-c") #'chicken-compile-current-file)
+    (define-key map (kbd "C-c C-d") #'chicken-doc)
+    (define-key map (kbd "C-c C-t") #'chicken-toc)
+    (define-key map (kbd "C-c C-w") #'chicken-wtf)
+    (define-key map (kbd "C-c C-a") #'chicken-apropos)
+    (define-key map (kbd "C-c C-q") #'chicken-comint-quit)
+    map)
+  "Chicken command keymap.")
+
 (defun chicken-scheme-setup ()
   "Setup Chicken `scheme-mode' variables."
   ;; setup module indent
@@ -574,34 +592,18 @@ If PROMPT is non-nil use it as the read prompt."
    'scheme-mode
    `(("\\<\\sw+\\>:" . font-lock-constant-face)
      ("##\\(core\\|sys\\)#\\sw+\\>" . font-lock-builtin-face)
-     (,chicken-keyword-regexp . font-lock-keyword-face))))
-
-(defvar chicken-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-M-x")   #'chicken-eval-definition) ; Gnu convention
-    (define-key map (kbd "C-x C-e") #'chicken-eval-last-sexp)  ; Gnu convention
-    (define-key map (kbd "C-c C-e") #'chicken-eval-last-sexp)
-    (define-key map (kbd "C-c C-b") #'chicken-eval-buffer)
-    (define-key map (kbd "C-c C-r") #'chicken-eval-region)
-    (define-key map (kbd "C-c C-l") #'chicken-load-file)
-    (define-key map (kbd "C-c C-f") #'chicken-load-current-file)
-    (define-key map (kbd "C-c C-c") #'chicken-compile-current-file)
-    (define-key map (kbd "C-c C-d") #'chicken-doc)
-    (define-key map (kbd "C-c C-t") #'chicken-toc)
-    (define-key map (kbd "C-c C-w") #'chicken-wtf)
-    (define-key map (kbd "C-c C-a") #'chicken-apropos)
-    (define-key map (kbd "C-c C-q") #'chicken-comint-quit)
-    map)
-  "Chicken Minor Mode Map.")
+     (,chicken-keyword-regexp . font-lock-keyword-face)))
+  ;; setup scheme-mode-map
+  (setq-local scheme-mode-map chicken-mode-map))
 
 (defun chicken-define-menu ()
   "Define Chicken  menu."
-  (easy-menu-define chicken-mode-menu chicken-mode-map
+  (easy-menu-define chicken-mode-menu scheme-mode-map
     "Chicken Minor Mode Menu"
     '("Chicken"
       ["Eval region" chicken-eval-region t]
       ["Eval buffer" chicken-eval-buffer t]
-      ["Eval definition" chicken-eval-definition t]
+      ["Eval define" chicken-eval-define t]
       ["Eval last sexp" chicken-eval-last-sexp t]
       "--"
       ["Load file" chicken-load-file t]
@@ -634,7 +636,6 @@ The following commands are available:
 \\{chicken-mode-map}"
 
   :lighter ""
-  :keymap chicken-mode-map
   (cond
    (chicken-mode
     ;; scheme setup
