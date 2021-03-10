@@ -97,3 +97,7 @@ GTAGS
 
 # Autoloads
 *-autoloads.el
+
+# chicken flymake (temporary)
+chicken-flymake.el
+
