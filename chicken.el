@@ -119,12 +119,12 @@ considered a Chicken source file by `chicken-load-file'."
     (toc      . ",toc %S")
     (wtf      . ",wtf %S")
     (help     . ",?")
-    (load     . "(load \"%s\")")
-    (import   . "(import %S)")
-    (doc-dwim . "(doc-dwim \"%s\")")
-    (apropos  . "(apropos \"%s\")")
-    (compile  . "(compile-file \"%s\")")
-    (trace    . "(trace/untrace \"%s\")"))
+    (load     . "(load %S)")
+    (import   . "(import %s)")
+    (doc-dwim . "(doc-dwim %S)")
+    (apropos  . "(apropos %S)")
+    (compile  . "(compile-file %S)")
+    (trace    . "(trace/untrace %S)"))
   "Operation associative list: (OP-KEY . OP-FMT).")
 
 (defvar chicken-version "0.0.2 Alpha"
@@ -198,7 +198,6 @@ considered a Chicken source file by `chicken-load-file'."
   (get-buffer-process (if (buffer-live-p chicken-proc-buffer)
                           chicken-proc-buffer
                         (chicken-comint-run))))
-
 
 (defun chicken-proc-sentinel (process event)
   "Sentinel function to handle (PROCESS EVENT) relation."
@@ -405,6 +404,12 @@ If PROMPT is non-nil use it as the read prompt."
   (interactive "r")
   (chicken-comint-send-region start end))
 
+(defun chicken-import (library)
+  "Import LIBRARY operation."
+  (interactive (chicken-read-thing nil "Lib"))
+  ;; import operation
+  (chicken-comint-send-string library 'import))
+
 (defun chicken-load-file (file-name)
   "Load the target FILE-NAME."
   (interactive (comint-get-source "File: "
@@ -443,11 +448,35 @@ If PROMPT is non-nil use it as the read prompt."
     ;; compile operation
     (chicken-comint-send-string file-name 'compile)))
 
+(defun chicken-toc (string)
+  "List contents (toc) of the given STRING."
+  (interactive (chicken-read-thing nil "Toc"))
+  ;; ,toc operation
+  (chicken-comint-send-string string 'toc))
+
+(defun chicken-wtf (string)
+  "Send STRING to where-to-find operation."
+  (interactive (chicken-read-thing nil "Pattern"))
+  ;; ,wtf operation
+  (chicken-comint-send-string string 'wtf))
+
 (defun chicken-doc (string)
-  "Call `,doc' STRING on the csi process."
-  (interactive (chicken-read-thing nil "String"))
-  ;; doc operation
+  "Describe identifier (STRING) using the ,doc operation."
+  (interactive (chicken-read-thing nil "Doc"))
+  ;; ,doc operation
   (chicken-comint-send-string string 'doc))
+
+(defun chicken-doc-dwim (string)
+  "Send STRING to the selected `doc-dwin' operation."
+  (interactive (chicken-read-thing nil "Doc"))
+  ;; doc-dwin operation
+  (chicken-comint-send-string string 'doc-dwim))
+
+(defun chicken-apropos (string)
+  "Send STRING to the selected `apropos' operation."
+  (interactive (chicken-read-thing nil "Pattern"))
+  ;; apropos operation
+  (chicken-comint-send-string string 'apropos))
 
 (defun chicken-trace (func)
   "Trace the target FUNC (function)."
@@ -547,7 +576,7 @@ If PROMPT is non-nil use it as the read prompt."
      ("##\\(core\\|sys\\)#\\sw+\\>" . font-lock-builtin-face)
      (,chicken-keyword-regexp . font-lock-keyword-face))))
 
-(defvar chicken-minor-mode-map
+(defvar chicken-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-M-x")   #'chicken-eval-definition) ; Gnu convention
     (define-key map (kbd "C-x C-e") #'chicken-eval-last-sexp)  ; Gnu convention
@@ -556,14 +585,18 @@ If PROMPT is non-nil use it as the read prompt."
     (define-key map (kbd "C-c C-r") #'chicken-eval-region)
     (define-key map (kbd "C-c C-l") #'chicken-load-file)
     (define-key map (kbd "C-c C-f") #'chicken-load-current-file)
+    (define-key map (kbd "C-c C-c") #'chicken-compile-current-file)
     (define-key map (kbd "C-c C-d") #'chicken-doc)
+    (define-key map (kbd "C-c C-t") #'chicken-toc)
+    (define-key map (kbd "C-c C-w") #'chicken-wtf)
+    (define-key map (kbd "C-c C-a") #'chicken-apropos)
     (define-key map (kbd "C-c C-q") #'chicken-comint-quit)
     map)
-  "Chicken's minor-mode keymap.")
+  "Chicken Minor Mode Map.")
 
 (defun chicken-define-menu ()
   "Define Chicken  menu."
-  (easy-menu-define chicken-minor-mode-menu chicken-minor-mode-map
+  (easy-menu-define chicken-mode-menu chicken-mode-map
     "Chicken Minor Mode Menu"
     '("Chicken"
       ["Eval region" chicken-eval-region t]
@@ -574,7 +607,12 @@ If PROMPT is non-nil use it as the read prompt."
       ["Load file" chicken-load-file t]
       ["Load current file" chicken-load-file t]
       "--"
-      ["Doc" chicken-doc t])))
+      ["Doc" chicken-doc t]
+      ["Toc" chicken-toc t]
+      ["Wtf" chicken-wtf t]
+      ["Doc-dwim" chicken-doc-dwim t]
+      "--"
+      ["Apropos" chicken-apropos t])))
 
 ;;;###autoload
 (define-minor-mode chicken-mode
@@ -593,10 +631,10 @@ it is disabled.
 
 The following commands are available:
 
-\\{chicken-minor-mode-map}"
+\\{chicken-mode-map}"
 
   :lighter ""
-  :keymap chicken-minor-mode-map
+  :keymap chicken-mode-map
   (cond
    (chicken-mode
     ;; scheme setup
