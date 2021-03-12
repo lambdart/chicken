@@ -58,7 +58,7 @@
   :group 'chicken
   :type 'string)
 
-(defcustom chicken-echo-last-output-flag nil
+(defcustom chicken-echo-last-output-flag t
   "Non-nil means echo last output text.
 Using the `message' builtin function."
   :group 'chicken
@@ -468,7 +468,7 @@ If PROMPT is non-nil use it as the read prompt."
 
 (defun chicken-doc-dwim (string)
   "Send STRING to the selected `doc-dwin' operation."
-  (interactive (chicken-read-thing nil "Doc"))
+  (interactive (chicken-read-thing nil "Doc-dwim"))
   ;; doc-dwin operation
   (chicken-comint-send-string string 'doc-dwim))
 
@@ -569,6 +569,8 @@ If PROMPT is non-nil use it as the read prompt."
     (define-key map (kbd "C-c C-l") #'chicken-load-file)
     (define-key map (kbd "C-c C-f") #'chicken-load-current-file)
     (define-key map (kbd "C-c C-c") #'chicken-compile-current-file)
+    (define-key map (kbd "C-c d") #'chicken-doc-dwim)
+    (define-key map (kbd "C-c I") #'chicken-import)
     (define-key map (kbd "C-c C-d") #'chicken-doc)
     (define-key map (kbd "C-c C-t") #'chicken-toc)
     (define-key map (kbd "C-c C-w") #'chicken-wtf)
@@ -604,7 +606,9 @@ If PROMPT is non-nil use it as the read prompt."
       ["Eval region" chicken-eval-region t]
       ["Eval buffer" chicken-eval-buffer t]
       ["Eval define" chicken-eval-define t]
-      ["Eval last sexp" chicken-eval-last-sexp t]
+      ["Eval last-sexp" chicken-eval-last-sexp t]
+      "--"
+      ["Import" chicken-import]
       "--"
       ["Load file" chicken-load-file t]
       ["Load current file" chicken-load-file t]
@@ -612,9 +616,11 @@ If PROMPT is non-nil use it as the read prompt."
       ["Doc" chicken-doc t]
       ["Toc" chicken-toc t]
       ["Wtf" chicken-wtf t]
-      ["Doc-dwim" chicken-doc-dwim t]
       "--"
-      ["Apropos" chicken-apropos t])))
+      ["Doc-dwim" chicken-doc-dwim t]
+      ["Apropos" chicken-apropos t]
+      "--"
+      ["Compile" chicken-compile-current-file t])))
 
 ;;;###autoload
 (define-minor-mode chicken-mode
