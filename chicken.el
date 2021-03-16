@@ -74,7 +74,7 @@ Using the `message' builtin function."
   :group 'chicken
   :type 'string)
 
-(defcustom chicken-comint-prompt-regexp "#[^;]*;[^:0-9]*:?[0-9]+> "
+(defcustom chicken-comint-prompt-regexp "^#;[0-9]+>.+$"
   "Regexp to recognize prompt."
   :group 'chicken
   :type 'regexp)
@@ -87,7 +87,7 @@ Using the `message' builtin function."
 (defcustom chicken-program (executable-find "csi")
   "Chicken executable full path program."
   :group 'chicken
-  :type 'string
+  :type 'file
   :set `(lambda (symbol value)
           (set symbol (executable-find value))))
 
@@ -97,7 +97,7 @@ Using the `message' builtin function."
   :type 'list)
 
 (defcustom chicken-comint-start-file
-  (expand-file-name "chicken-start.scm" (cadr (split-string (pwd))))
+  (expand-file-name "start/chicken-start.scm" (cadr (split-string (pwd))))
   "The `make-comint' start file argument."
   :group 'chicken
   :type 'string)
@@ -115,17 +115,22 @@ considered a Chicken source file by `chicken-load-file'."
   :type 'integer)
 
 (defvar chicken-ops-alist
-  `((doc      . ",doc %S")
-    (toc      . ",toc %S")
-    (wtf      . ",wtf %S")
-    (help     . ",?")
-    (load     . "(load %S)")
-    (import   . "(import %s)")
-    (doc-dwim . "(doc-dwim %S)")
-    (apropos  . "(apropos %S)")
-    (compile  . "(compile-file %S)")
-    (trace    . "(trace/untrace %S)"))
-  "Operation associative list: (OP-KEY . OP-FMT).")
+  `((input    . (nil "%s"))
+    (doc      . (chicken-describe-resp-fn ",doc %s"))
+    (toc      . (chicken-describe-resp-fn ",toc %s"))
+    (wtf      . (chicken-describe-resp-fn ",wtf %s"))
+    (apropos  . (chicken-apropos-resp-fn "(apropos %s sort: #:module)"))
+    (doc-dwim . (chicken-describe-resp-fn "(doc-dwim %S)"))
+    (eval     . (chicken-default-resp-fn "%s"))
+    (load     . (nil "(load %S)"))
+    (import   . (chicken-default-resp-fn "(import %s)"))
+    (compile  . (nil "(compile-file %S)"))
+    (trace    . (nil "(trace/untrace %S)")))
+  "Operation associative list: (OP-KEY . (OP-FN OP-FMT).
+OP-KEY, the operation key selector.
+OP-FN, the operation response handler function,
+manly used to parse/display the resulting text output.
+OP-FMT, the operation format string.")
 
 (defvar chicken-version "0.0.2 Alpha"
   "Current version string.")
@@ -151,13 +156,16 @@ considered a Chicken source file by `chicken-load-file'."
 (defvar chicken-prev-l/c-dir/file nil
   "Caches the last (directory . file) pair.")
 
-(defun chicken-display-version ()
+(defvar chicken-current-resp-handler nil
+  "Handle output function.")
+
+(defun chicken-show-version ()
   "Echo the current `chicken' version."
   (interactive)
   (message "chicken (version %s)" chicken-version))
 
 (defun chicken-get-debug-buffer ()
-  "Return/create the `chicken-debug-buffer'."
+  "Get (or create) the `chicken-debug-buffer' buffer."
   (if (buffer-live-p chicken-debug-buffer)
       chicken-debug-buffer
     (let ((buffer (get-buffer-create chicken-debug-buffer-name)))
@@ -193,6 +201,71 @@ considered a Chicken source file by `chicken-load-file'."
   "Remove `chicken-overlay' display (if any) prior to new user input."
   (delete-overlay chicken-overlay))
 
+(defun chicken-filter-output-string (string)
+  "Parse the process output STRING."
+  ;; return the filtered output string
+  (dolist (regexp `(,chicken-comint-prompt-regexp) string)
+    (setq string (replace-regexp-in-string regexp "" string))))
+
+(defun chicken-echo-last-output (text)
+  "Echo TEXT output, i.e, insert into *Message* buffer."
+  (message " ⇒ %s" text))
+
+(defun chicken-parse-text-output ()
+  "Return the last parsed comint output."
+  (mapconcat (lambda (s)
+               (if (string-match-p chicken-comint-prompt-regexp s)
+                   (replace-regexp-in-string chicken-comint-prompt-regexp "" s)
+                 s))
+             (reverse chicken-comint-output-cache) ""))
+
+(defun chicken-parse-last-output ()
+  "Return the last parsed comint output."
+  (let* ((text (split-string (chicken-parse-text-output) "\n"))
+         (line (car text)))
+    ;; update last-output if necessary
+    (while (and line (string-empty-p line))
+      (setq line (pop text)))
+    ;; return nil if line is empty
+    (if (or (eq line nil) (string-empty-p line)) "nil" line)))
+
+(defun chicken-describe-resp-fn ()
+  "Display the full documentation of the ELEMENT."
+  ;; wait for the comint output
+  (chicken-comint-wait-output)
+  ;; show in the help buffer
+  (let ((text-output (chicken-parse-text-output)))
+    ;; set up the help-xref
+    (help-setup-xref
+     (list (lambda (_ __) nil) nil (current-buffer))
+     (called-interactively-p 'interactive))
+    ;; print output on the help buffer
+    (save-excursion
+      (with-help-window (help-buffer)
+        (princ text-output)))))
+
+(defun chicken-default-resp-fn ()
+  "Default display comint text output function.
+
+This function display (or insert the text) in diverse locations
+with is controlled by the following custom flags:
+
+`chicken-display-overlay-flag',
+`chicken-echo-last-output-flag'
+
+See its documentations to understand the be behavior
+that will be imposed if they are non-nil."
+
+  ;; wait for the comint output
+  (chicken-comint-wait-output)
+  ;; parse the text and display it
+  (let ((line (chicken-parse-last-output)))
+    ;; echo last output text
+    (chicken-echo-last-output line)
+    ;; maybe display the overlay (with the output text)
+    (when chicken-display-overlay-flag
+      (chicken-display-overlay (concat " ⇒ " line)))))
+
 (defun chicken-get-proc ()
   "Return current chicken process."
   (get-buffer-process (if (buffer-live-p chicken-proc-buffer)
@@ -203,12 +276,6 @@ considered a Chicken source file by `chicken-load-file'."
   "Sentinel function to handle (PROCESS EVENT) relation."
   (princ (format "Process: %s had the event '%s'" process event)))
 
-(defun chicken-filter-output-string (string)
-  "Parse the process output STRING."
-  ;; return the filtered output string
-  (dolist (regexp `(,chicken-comint-prompt-regexp) string)
-    (setq string (replace-regexp-in-string regexp "" string))))
-
 (defun chicken-comint-in-progress-timeout ()
   "Timeout, set the control variable to nil."
   (setq chicken-comint-filter-in-progress nil))
@@ -216,57 +283,28 @@ considered a Chicken source file by `chicken-load-file'."
 (defun chicken-comint-wait-output ()
   "Wait for the comint output."
   ;; run with timer (timeout)
-  (run-with-timer chicken-comint-output-timeout
-                  nil
+  (run-with-timer chicken-comint-output-timeout nil
                   'chicken-comint-in-progress-timeout)
   ;; wait for the final prompt
   (while chicken-comint-filter-in-progress
     (sleep-for 0 10)))
 
-(defun chicken-display-comint-output ()
-  "Display/Show output from the comint csi interpreter buffer.
-
-This function display (or insert the text) in diverse locations
-with is controlled by the following custom flags:
-
-`chicken-display-overlay-flag',
-`chicken-echo-last-output-flag'
-
-See its documentations to understand the be behavior
-that will be imposed if they are true."
-
-  ;; wait for the comint output
-  (chicken-comint-wait-output)
-  ;; parse text output
-  (let ((line (pop chicken-comint-output-cache)))
-    (while (and (not (eq line nil))
-                (string-empty-p line))
-      (setq line (pop chicken-comint-output-cache)))
-    ;; update line if necessary
-    (setq line (or line "nil"))
-    ;; display line in the overlay
-    (and chicken-display-overlay-flag
-         (chicken-display-overlay (concat " => " line)))
-    ;; echo the output line
-    (and chicken-echo-last-output-flag
-         (message " => %s" line))
-    ;; cache last output line
-    (setq chicken-comint-last-output line)
-    ;; return nil
-    nil))
+(defun chicken-comint-cache-output (string)
+  "Cache comint output STRING."
+  (let ((text (chicken-filter-output-string string)))
+    ;; cache the parsed text
+    (and (not (string-empty-p text))
+         (push text chicken-comint-output-cache))))
 
 (defun chicken-comint-preoutput-filter (string)
   "Return the output STRING."
-  (let ((text (chicken-filter-output-string string)))
-    ;; cache the parsed text
-    (push text chicken-comint-output-cache)
-    ;; insert text string in the debug buffer
-    (chicken-insert-debug-output text)
-    ;; verify filter in progress control variable
-    (when (string-match-p chicken-comint-prompt-regexp string)
-      (setq chicken-comint-filter-in-progress nil))
-    ;; return the string to the comint buffer (implicit)
-    string))
+  ;; cache comint response
+  (push string chicken-comint-output-cache)
+  ;; verify filter in progress control variable
+  (when (string-match-p chicken-comint-prompt-regexp string)
+    (setq chicken-comint-filter-in-progress nil))
+  ;; return the string to the comint buffer (implicit)
+  string)
 
 (defun chicken-comint-send (send-func &rest args)
   "Send ARGS, i.e, string or region using the chosen SEND-FUNC.
@@ -307,25 +345,32 @@ SEND-FUNC should be `comint-send-string' or `comint-send-region'."
     ;;; cache the process buffer (implicit: return it)
     (setq chicken-proc-buffer buffer)))
 
-(defun chicken-comint-send-string (string &optional op-key)
-  "Send STRING to the current inferior process.
-Format the string selecting the right format using the OP-KEY."
-  (let ((string (if (not op-key) string
-                  (format (cdr (assoc op-key chicken-ops-alist)) string))))
-    ;; send string
+(defun chicken-comint-send-string (string op-key)
+  "Send STRING after select the right operation using the OP-KEY."
+  (let* ((op (cdr (assoc op-key chicken-ops-alist)))
+         (op-fn (car op))
+         (op-fmt (cadr op)))
+    ;; format string and send to comint
     (chicken-comint-send #'comint-send-string
-                         (substring-no-properties string))))
+                         (substring-no-properties (format op-fmt string)))
+    ;; if necessary call the response handler
+    (and op-fn (funcall op-fn))))
 
-(defun chicken-comint-send-region (start end)
-  "Send region delimited bu START/END to the inferior process.
-TIMEOUT, the `accept-process-output' timeout."
-  (chicken-comint-send #'comint-send-region start end))
+(defun chicken-comint-send-region (start end op-key)
+  "Send region (START END) after selecting with OP-KEY the right operation."
+  (let* ((op (cdr (assoc op-key chicken-ops-alist)))
+         (op-fn (car op)))
+    ;; send region to comint
+    (chicken-comint-send #'comint-send-region start end)
+    ;; if necessary call the response handler
+    (and op-fn (funcall op-fn))))
 
 (defun chicken-comint-input-sender (_ string)
   "Comint input sender STRING function."
   (chicken-comint-send-string (if (string-empty-p string)
                                   "(begin)"
-                                string)))
+                                string)
+                              'input))
 
 (defun chicken-comint-input-filter (string)
   "Don't save anything on the STRING matching `chicken-comint-filter-regexp'."
@@ -356,15 +401,6 @@ This function will be called by `chicken-mode-hook.'"
   ;; kill the buffer
   (kill-buffer chicken-proc-buffer))
 
-(defun chicken-eval-define ()
-  "Send definition to the Chicken comint process."
-  (interactive)
-  (save-excursion
-    (end-of-defun)
-    (let ((end (point)))
-      (beginning-of-defun)
-      (chicken-comint-send-region (point) end))))
-
 (defun chicken-read-thing (&optional thing prompt)
   "Return `thing-at-point' or read it.
 If THING is non-nil use it as the `thing-at-point' parameter,
@@ -376,20 +412,27 @@ If PROMPT is non-nil use it as the read prompt."
     ;; return the read list string
     (list (read-string prompt nil nil string))))
 
-(defun chicken-eval-expression (sexp)
-  "Eval SEXP, i.e, send it to Chicken comint process."
+(defun chicken-eval-define ()
+  "Send definition to the Chicken comint process."
+  (interactive)
+  (save-excursion
+    (end-of-defun)
+    (let ((end (point)))
+      (beginning-of-defun)
+      (chicken-comint-send-region (point) end 'eval))))
+
+(defun chicken-eval-sexp (sexp)
+  "Eval SEXP string, i.e, send it to Chicken comint process."
   (interactive (chicken-read-thing 'sexp "Eval"))
-  ;; eval string s-expression
-  (chicken-comint-send-string sexp))
+  ;; eval string symbolic expression
+  (chicken-comint-send-string sexp 'eval))
 
 (defun chicken-eval-last-sexp ()
   "Send the previous sexp to the inferior process."
   (interactive)
   ;; send region of the last expression
   (chicken-comint-send-region
-   (save-excursion (backward-sexp) (point)) (point))
-  ;; display the operation output (if any)
-  (chicken-display-comint-output))
+   (save-excursion (backward-sexp) (point)) (point) 'eval))
 
 (defun chicken-eval-buffer ()
   "Eval current buffer."
@@ -397,12 +440,13 @@ If PROMPT is non-nil use it as the read prompt."
   (save-excursion (widen)
                   (let ((case-fold-search t))
                     (chicken-comint-send-region (point-min)
-                                                (point-max)))))
+                                                (point-max)
+                                                'eval))))
 
 (defun chicken-eval-region (start end)
   "Eval region delimited by START/END."
   (interactive "r")
-  (chicken-comint-send-region start end))
+  (chicken-comint-send-region start end 'eval))
 
 (defun chicken-import (library)
   "Import LIBRARY operation."
@@ -462,7 +506,7 @@ If PROMPT is non-nil use it as the read prompt."
 
 (defun chicken-doc (string)
   "Describe identifier (STRING) using the ,doc operation."
-  (interactive (chicken-read-thing nil "Doc"))
+  (interactive (chicken-read-thing 'sexp "Doc"))
   ;; ,doc operation
   (chicken-comint-send-string string 'doc))
 
@@ -475,8 +519,12 @@ If PROMPT is non-nil use it as the read prompt."
 (defun chicken-apropos (string)
   "Send STRING to the selected `apropos' operation."
   (interactive (chicken-read-thing nil "Pattern"))
-  ;; apropos operation
-  (chicken-comint-send-string string 'apropos))
+  ;; verify if the given/read string represents a quoted symbol
+  (let ((str (if (string-match "^'" string)
+                 string
+               (format "%S" string))))
+    ;; send apropos operation
+    (chicken-comint-send-string str 'apropos)))
 
 (defun chicken-trace (func)
   "Trace the target FUNC (function)."
@@ -556,7 +604,10 @@ If PROMPT is non-nil use it as the read prompt."
   (let ((str "\\<\\(module\\>"))
     (dolist (keyword keyword-list)
       (put (car keyword) 'scheme-indent-hook (cadr keyword))
-      (setq str (concat str "\\|" (regexp-quote (symbol-name (car keyword))) "\\>")))
+      (setq str (concat str "\\|"
+                        (regexp-quote (symbol-name
+                                       (car keyword)))
+                        "\\>")))
     (concat str "\\)")))
 
 (defvar chicken-mode-map
@@ -583,6 +634,12 @@ If PROMPT is non-nil use it as the read prompt."
   "Setup Chicken `scheme-mode' variables."
   ;; setup module indent
   (put 'module 'scheme-indent-function 'chicken-module-indent)
+  (put 'and-let* 'scheme-indent-function 1)
+  (put 'parameterize 'scheme-indent-function 1)
+  (put 'handle-exceptions 'scheme-indent-function 1)
+  (put 'when 'scheme-indent-function 1)
+  (put 'unless 'scheme-indent-function 1)
+  (put 'match 'scheme-indent-function 1)
   ;; update keyword regex pattern
   (setq chicken-keyword-regexp
         (chicken-build-keyword-regexp chicken-keyword-list))
@@ -659,7 +716,7 @@ The following commands are available:
 (define-derived-mode chicken-comint-mode comint-mode "CHICKEN-REPL"
   "Major mode for `chicken-comint' REPL buffer.
 
-Runs a CSI interpreter with the help of comint-mode,
+Runs a CSI interpreter with the help of `comint-mode',
 use the buffer abstraction as the main I/O bridge between
 Emacs and the inferior process.
 
@@ -677,8 +734,8 @@ The following commands are available:
   ;; set comint variables
   (setq comint-prompt-regexp chicken-comint-prompt-regexp
         comint-prompt-read-only chicken-comint-prompt-read-only
-        comint-input-sender  (function chicken-comint-input-sender)
-        comint-input-filter  (function chicken-comint-input-filter)
+        comint-input-sender (function chicken-comint-input-sender)
+        comint-input-filter (function chicken-comint-input-filter)
         comint-get-old-input (function chicken-comint-get-old-input))
   ;; add comint preoutput filter function
   (add-hook 'comint-preoutput-filter-functions
