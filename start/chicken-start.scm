@@ -26,7 +26,9 @@
           (##sys#current-environment)))))
 
 (define (chicken-apropos-completions prefix)
-  (let ((completions (apropos-list `(: bos ,prefix) #:macros? #t)))
+  (let ((completions (apropos-list `(: bos ,prefix)
+                                   #:macros? #t
+                                   #:raw? #t)))
     (remove
      (lambda (completions)
        (substring-index "#" completions))
