@@ -45,16 +45,16 @@
     (wtf      . (nil ",wtf %s"))
     (apropos  . (chicken-apropos-display "(apropos %s sort: #:module)"))
     (doc-dwim . (nil "(doc-dwim %S)"))
-    (eval     . (chicken-overlay-display "%s"))
+    (eval     . (chicken-overlay-output-handler "%s"))
     (load     . (nil "(load %S)"))
     (import   . (nil "(import %s)"))
     (compile  . (nil "(compile-file %S)"))
     (trace    . (nil "(trace/untrace %S)")))
   "Operation associative list: (OP-KEY . (OP-FN OP-FMT).
 OP-KEY, the operation key selector.
-OP-DFN, the operation display response function,
+OP-OUTPUT-HANDLER, the operation display response function,
 manly used to parse/display the resulting text output.
-OP-FMT, the operation format string.")
+OP-FORMAT-STRING, the operation format string.")
 
 (defvar chicken-op-mode-map
   (let ((map (keymap-parent scheme-mode-map)))
@@ -76,25 +76,21 @@ OP-FMT, the operation format string.")
     map)
   "Chicken commands (or operations) keymap.")
 
-(defun chicken-op-dispatch (op-key string proc-flag)
+(defun chicken-op-dispatch (op-key string &optional echo)
   "Dispatch the STRING operation defined by OP-KEY.
 If PROC-FLAG is non-nil use the comint redirect feature, otherwise
 send it directly to the comint buffer."
-  (let* ((comint-send-func (if proc-flag
-                               #'chicken-comint-redirect-send
-                             #'chicken-comint-send)) ; process or comint buffer?
-         ;; select operation
-         (op (cdr (assoc op-key chicken-op-alist)))
+  (let* ((op (cdr (assoc op-key chicken-op-alist))) ; select operation
          ;; get its response function
-         (op-dfn (car op))
+         (op-output-handler (car op))
          ;; get its format
-         (op-fmt (cadr op))
+         (op-format-string (cadr op))
          ;; parse the operation string (if necessary)
-         (op-input (format op-fmt string)))
+         (op-input-string (format op-format-string string)))
     ;; send the parsed input to REPL process/buffer
-    (funcall comint-send-func op-input)
+    (chicken-comint-redirect-send op-input-string)
     ;; if we have the one display function wait for the response output
-    (when op-dfn (funcall op-dfn))))
+    (when op-output-handler (funcall op-output-handler))))
 
 (defun chicken-op-thing-at-point (&optional thing prompt)
   "Return `thing-at-point' or read it.
@@ -115,8 +111,7 @@ If PROMPT is non-nil use it as the read prompt."
     (let ((end (point)))
       (beginning-of-defun)
       (chicken-op-dispatch 'eval
-                           (buffer-substring-no-properties (point) end)
-                           t))))
+                           (buffer-substring-no-properties (point) end)))))
 
 (defun chicken-op-eval-sexp (sexp)
   "Eval SEXP string, i.e, send it to Chicken comint process."
