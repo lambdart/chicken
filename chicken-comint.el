@@ -110,17 +110,33 @@
   (if (buffer-live-p chicken-comint-redirect-buffer)
       chicken-comint-redirect-buffer
     (let ((buffer (get-buffer-create chicken-comint-redirect-buffer-name)))
-      ;; (with-current-buffer buffer
-      ;;   ;; change read-only local property
-      ;;   (setq buffer-read-only t))
-      ;; ;; cache and return the buffer
+      (with-current-buffer buffer
+        ;; enable scheme-mode if available and chicken-mode?
+        (and (require 'scheme nil t)
+             (fboundp 'scheme-mode)
+             ;; (chicken-mode)
+             (scheme-mode)))
+      ;; cache and return the buffer
       (setq chicken-comint-redirect-buffer buffer))))
 
-;; enable scheme-mode if available and chicken-mode?
-;; (and (require 'scheme nil t)
-;;      (fboundp 'scheme-mode)
-;;      (scheme-mode)
-;;      (chicken-mode))
+(defun chicken-comint-redirect-buffer-content ()
+  "Return the redirect-buffer content."
+  (with-current-buffer (chicken-comint-redirect-buffer)
+    (buffer-string)))
+
+(defun chicken-comint-redirect-completed-p ()
+  "Return if the redirecting is over."
+  ;; comint-redirect-completed is local in relation to the comint-buffer
+  (with-current-buffer chicken-comint-buffer
+    (eq comint-redirect-completed nil)))
+
+(defun chicken-comint-redirect-erase-buffer ()
+  "Clean the redirect buffer."
+  (with-current-buffer (chicken-comint-redirect-buffer)
+    ;; remove read only protection (just in case)
+    (setq buffer-read-only nil)
+    ;; clean the buffer
+    (erase-buffer)))
 
 (defun chicken-comint-proc ()
   "Return current comint process."
@@ -149,38 +165,27 @@
       (sleep-for 0 10))))
 
 (defmacro chicken-comint-proc-wait-redirect (&rest body)
-  "Wait for the comint output."
-  `(let ((output nil))
-     ;; wait for the process
-     (with-current-buffer chicken-comint-buffer
-       ;; TODO: add timeout
-       (while (eq comint-redirect-completed nil)
-         (sleep-for 0 10)))
-     ;; set output
-     (setq output
-           (with-current-buffer (chicken-comint-redirect-buffer)
-             (buffer-substring-no-properties (point-min)
-                                             (point-max))))
+  "Wait for the comint redirect buffer output and evaluate the BODY forms."
+  `(let ((output (chicken-comint-redirect-buffer-content))
+         (limit 120))
+     ;; verify if redirect is over or we already have some output
+     ;; in the redirect-buffer
+     (while (and (> limit 0)
+                 (string= output "")
+                 (chicken-comint-redirect-completed-p))
+       ;; wait a little bit
+       (sleep-for 0 10)
+       ;; decrease the limit counter ~= 1.2 seconds
+       (setq limit (- limit 1))
+       ;; update the output
+       (setq output (chicken-comint-redirect-buffer-content)))
      ;; cache the output
      (push output chicken-comint-output-cache)
      ;; evaluate the rest of forms
      ,@body))
 
-;; (defmacro chicken-comint-wait-output-1 (pred &rest body)
-;;   "Wait for the comint output."
-;;   `(unless chicken-comint-proc-in-progress
-;;      ;; run with timer (timeout)
-;;      (run-with-timer chicken-comint-output-timeout nil
-;;                      'chicken-comint-proc-in-progress-timeout)
-;;      ;; wait for the final prompt
-;;      (while ,pred (sleep-for 0 10)))
-;;      ;; expand and evaluate body forms
-;;      ,@body)
-
-(defun chicken-comint-raw-output ()
-  "Return cached raw output."
-  ;; verify if the if the process finished
-  (chicken-comint-proc-wait)
+(defun chicken-comint-cache-output ()
+  "Return cached cache output."
   ;; concat the output and return it
   (eval `(concat ,@(reverse chicken-comint-output-cache))))
 
@@ -219,15 +224,10 @@ The output is always cached in `chicken-comint-output-cache' list."
         (message "[CHICKEN]: error, no redirect buffer available")
       ;; output list should always start empty
       (setq chicken-comint-output-cache '(""))
-      ;; set progress control variable to true
-      ;; chicken-comint-proc-in-progress t)
-      (with-current-buffer buffer
-        ;; remove read only protection
-        (setq buffer-read-only nil)
-        ;; clean the buffer
-        (erase-buffer)
-        ;; send the 'command' to the comint process
-        (comint-redirect-send-command-to-process string buffer proc nil nil)))))
+      ;; erase redirect buffer
+      (chicken-comint-redirect-erase-buffer)
+      ;; send the 'command' to the comint process
+      (comint-redirect-send-command-to-process string buffer proc nil nil))))
 
 (defun chicken-comint-input-sender (_ string)
   "Comint input sender STRING function."
