@@ -42,20 +42,21 @@
 (defvar-local chicken-overlay-enabled-flag nil
   "Non-nil means the overlay is available in the current buffer.")
 
-(defun chicken-overlay-output-handler ()
-  "Display the TEXT using the `chicken-overlay'."
-  (chicken-comint-proc-wait-redirect
-   (let* ((lines (reverse (cl-remove-if #'string-empty-p
-                                        (split-string output "\n"))))
-          (text (concat " => " (or (car lines) "nil"))))
-     ;; move overlay to the point
-     (move-overlay chicken-overlay (point) (point) (current-buffer))
-     ;; the current C cursor code doesn't know to use the overlay's
-     ;; marker's stickiness to figure out whether to place the cursor
-     ;; before or after the string, so let's spoon-feed it the pos.
-     (put-text-property 0 1 'cursor t text)
-     ;; show the overlay text
-     (overlay-put chicken-overlay 'after-string text))))
+(defun chicken-overlay-display-handler (buffer)
+  "Handle the overlay OUTPUT display in the current BUFFER."
+  (chicken-comint-with-redirect-output
+   (with-current-buffer buffer
+     (let* ((lines (reverse (cl-remove-if #'string-empty-p
+                                          (split-string output "\n"))))
+            (text (concat " => " (car lines))))
+       ;; move overlay to the point
+       (move-overlay chicken-overlay (point) (point) (current-buffer))
+       ;; the current C cursor code doesn't know to use the overlay's
+       ;; marker's stickiness to figure out whether to place the cursor
+       ;; before or after the string, so let's spoon-feed it the pos.
+       (put-text-property 0 1 'cursor t text)
+       ;; show the overlay text
+       (overlay-put chicken-overlay 'after-string text)))))
 
 (defun chicken-overlay-delete ()
   "Remove `chicken-overlay' display (if any) prior to new user input."
