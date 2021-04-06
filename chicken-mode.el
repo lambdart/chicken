@@ -35,7 +35,9 @@
 ;;; Code:
 
 (require 'scheme)
+
 (require 'chicken-overlay)
+(require 'chicken-comint)
 
 (defvar chicken-mode nil)
 
@@ -203,9 +205,13 @@ The following commands are available:
     (add-hook 'pre-command-hook #'chicken-overlay-delete nil t))
    (t
     ;; ensure overlay was deleted
-    (chicken-delete-overlay)
+    (chicken-overlay-delete)
     ;; remove delete overlay hook
-    (remove-hook 'pre-command-hook #'chicken-overlay-delete) t)))
+    (remove-hook 'pre-command-hook #'chicken-overlay-delete t))))
+
+;; remove redirect inspector hook
+;; (remove-hook 'after-change-functions
+;;              #'chicken-comint-redirect-buffer-changed t))))
 
 (provide 'chiken-mode)
 

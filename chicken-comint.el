@@ -105,6 +105,10 @@
 (defvar chicken-comint-proc-in-progress nil
   "Indicates if the comint filter function is still in progress.")
 
+(defvar chicken-comint-resp-handler nil)
+
+(defvar chicken-comint-prev-buffer nil)
+
 (defun chicken-comint-redirect-buffer ()
   "Get or create the \\{chicken-comint-redirect-buffer}."
   (if (buffer-live-p chicken-comint-redirect-buffer)
@@ -114,7 +118,6 @@
         ;; enable scheme-mode if available and chicken-mode?
         (and (require 'scheme nil t)
              (fboundp 'scheme-mode)
-             ;; (chicken-mode)
              (scheme-mode)))
       ;; cache and return the buffer
       (setq chicken-comint-redirect-buffer buffer))))
@@ -125,10 +128,10 @@
     (buffer-string)))
 
 (defun chicken-comint-redirect-completed-p ()
-  "Return if the redirecting is over."
+  "Return if the PROC/BUFFER redirecting is over."
   ;; comint-redirect-completed is local in relation to the comint-buffer
   (with-current-buffer chicken-comint-buffer
-    (eq comint-redirect-completed nil)))
+    (null comint-redirect-completed)))
 
 (defun chicken-comint-redirect-erase-buffer ()
   "Clean the redirect buffer."
@@ -164,25 +167,23 @@
     (while chicken-comint-proc-in-progress
       (sleep-for 0 10))))
 
-(defmacro chicken-comint-proc-wait-redirect (&rest body)
-  "Wait for the comint redirect buffer output and evaluate the BODY forms."
-  `(let ((output (chicken-comint-redirect-buffer-content))
-         (limit 120))
-     ;; verify if redirect is over or we already have some output
-     ;; in the redirect-buffer
-     (while (and (> limit 0)
-                 (string= output "")
-                 (chicken-comint-redirect-completed-p))
-       ;; wait a little bit
-       (sleep-for 0 10)
-       ;; decrease the limit counter ~= 1.2 seconds
-       (setq limit (- limit 1))
-       ;; update the output
-       (setq output (chicken-comint-redirect-buffer-content)))
-     ;; cache the output
-     (push output chicken-comint-output-cache)
-     ;; evaluate the rest of forms
-     ,@body))
+(defmacro chicken-comint-with-redirect-output (&rest body)
+  "Evaluate the BODY forms with the redirect output."
+  ;; extract output from the buffer
+  `(let ((output (chicken-comint-redirect-buffer-content)))
+     ;; update output
+     (setq output (if (string= output "") "nil" output))
+     ;; evaluate body forms
+     ,@body
+     ;; clean display function
+     (setq chicken-comint-resp-handler nil
+           chicken-comint-prev-buffer nil)))
+
+(defun chicken-comint-redirect-dispatch-resp-handler ()
+  "Dispatch the display handler callback."
+  (when chicken-comint-resp-handler
+    (funcall chicken-comint-resp-handler
+             chicken-comint-prev-buffer)))
 
 (defun chicken-comint-cache-output ()
   "Return cached cache output."
@@ -214,20 +215,33 @@
       ;; always send a new line: <return> (implicit)
       (comint-send-string proc "\n"))))
 
-(defun chicken-comint-redirect-send (string)
-  "Send STRING using the comint redirect option.
-If OUTPUT-FLAG is non-nil returns RETURN the output, otherwise nil.
-The output is always cached in `chicken-comint-output-cache' list."
-  (let ((proc (chicken-comint-proc))
-        (buffer (chicken-comint-redirect-buffer)))
-    (if (not (buffer-live-p buffer))
-        (message "[CHICKEN]: error, no redirect buffer available")
-      ;; output list should always start empty
-      (setq chicken-comint-output-cache '(""))
+(defun chicken-comint-redirect-input-to-process
+    (send-func from-buffer echo &optional no-display &rest input)
+  "Send INPUT FROM-BUFFER to process using the chosen SEND-FUNC.
+If ECHO is non-nil, output in process buffer.
+If NO-DISPLAY is non-nil, do not show the output buffer."
+  (let* ((proc (chicken-comint-proc))
+         (proc-buffer (process-buffer proc))
+         (output-buffer (chicken-comint-redirect-buffer)))
+    (if (not (buffer-live-p output-buffer))
+        (message "[CHICKEN]: error, no redirect output buffer available")
       ;; erase redirect buffer
       (chicken-comint-redirect-erase-buffer)
-      ;; send the 'command' to the comint process
-      (comint-redirect-send-command-to-process string buffer proc nil nil))))
+      ;; change to the process buffer
+      (with-current-buffer proc-buffer
+        ;; set up for redirection
+        (comint-redirect-setup output-buffer
+                               chicken-comint-buffer        ; comint buffer
+                               chicken-comint-prompt-regexp ; finished regexp
+                               echo)                        ; echo input
+        ;; set the filter
+        (add-function :around (process-filter proc) #'comint-redirect-filter)
+        ;; apply the right process send function
+        (with-current-buffer from-buffer (apply send-func proc input))
+        ;; always send new line <return>
+        (process-send-string proc "\n")
+        ;; show the output
+        (or no-display (display-buffer (get-buffer-create output-buffer)))))))
 
 (defun chicken-comint-input-sender (_ string)
   "Comint input sender STRING function."
@@ -314,6 +328,11 @@ The following commands are available:
   ;; add comint preoutput filter function
   (add-hook 'comint-preoutput-filter-functions
             'chicken-comint-preoutput-filter nil t)
+  ;; customize redirect verbose
+  (customize-set-variable 'comint-redirect-verbose t)
+  ;; add dispatch display handler hook
+  (add-hook 'comint-redirect-hook
+            #'chicken-comint-redirect-dispatch-resp-handler)
   ;; set local paragraph variables
   (set (make-local-variable 'paragraph-separate) "\\'")
   (set (make-local-variable 'paragraph-start) chicken-comint-prompt-regexp))
