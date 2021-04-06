@@ -39,17 +39,18 @@
 (require 'chicken-comint)
 
 (defvar chicken-op-alist
-  `((input    . (nil "%s"))
-    (doc      . (nil ",doc %s"))
-    (toc      . (nil ",toc %s"))
-    (wtf      . (nil ",wtf %s"))
-    (apropos  . (chicken-apropos-display "(apropos %s sort: #:module)"))
-    (doc-dwim . (nil "(doc-dwim %S)"))
-    (eval     . (chicken-overlay-output-handler "%s"))
-    (load     . (nil "(load %S)"))
-    (import   . (nil "(import %s)"))
-    (compile  . (nil "(compile-file %S)"))
-    (trace    . (nil "(trace/untrace %S)")))
+  `((input     . (nil "%s"))
+    (doc       . (nil ",doc %s"))
+    (toc       . (nil ",toc %s"))
+    (wtf       . (nil ",wtf %s"))
+    (apropos   . (chicken-apropos-display "(apropos %s sort: #:module)"))
+    (doc-dwim  . (nil "(doc-dwim %S)"))
+    (eval      . (nil "%s"))
+    (eval-last . (chicken-overlay-display-handler "%s"))
+    (load      . (nil "(load %S)"))
+    (import    . (nil "(import %s)"))
+    (compile   . (nil "(compile-file %S)"))
+    (trace     . (nil "(trace/untrace %S)")))
   "Operation associative list: (OP-KEY . (OP-FN OP-FMT).
 OP-KEY, the operation key selector.
 OP-OUTPUT-HANDLER, the operation display response function,
@@ -76,21 +77,32 @@ OP-FORMAT-STRING, the operation format string.")
     map)
   "Chicken commands (or operations) keymap.")
 
-(defun chicken-op-dispatch (op-key string &optional echo)
-  "Dispatch the STRING operation defined by OP-KEY.
-If PROC-FLAG is non-nil use the comint redirect feature, otherwise
-send it directly to the comint buffer."
+(defun chicken-op-dispatch (op-key input-type &optional echo &rest input)
+  "Dispatch the operation defined by OP-KEY.
+INPUT-TYPE, the string \"region\" or \"string\".
+If ECHO is non-nil, mirror the output in the comint buffer.
+INPUT, the string or the region bounds."
   (let* ((op (cdr (assoc op-key chicken-op-alist))) ; select operation
-         ;; get its response function
-         (op-output-handler (car op))
+         ;; get its response handler function
+         (op-display-handler (car op))
          ;; get its format
-         (op-format-string (cadr op))
-         ;; parse the operation string (if necessary)
-         (op-input-string (format op-format-string string)))
+         (op-format-string (cadr op)))
+    ;; set comint display function callback and cache the current buffer
+    (setq chicken-comint-resp-handler op-display-handler
+          chicken-comint-prev-buffer (current-buffer))
     ;; send the parsed input to REPL process/buffer
-    (chicken-comint-redirect-send op-input-string)
-    ;; if we have the one display function wait for the response output
-    (when op-output-handler (funcall op-output-handler))))
+    (apply 'chicken-comint-redirect-input-to-process
+           ;; set process send function
+           (intern (concat "process-send-" input-type))
+           ;; from current buffer
+           (current-buffer)
+           ;; mirror output to comint buffer?
+           (or echo nil)
+           ;; display output?
+           nil
+           ;; format string or send region (beg/end)?
+           (if (> (length input) 1) input
+             (list (format op-format-string (car input)))))))
 
 (defun chicken-op-thing-at-point (&optional thing prompt)
   "Return `thing-at-point' or read it.
@@ -110,23 +122,20 @@ If PROMPT is non-nil use it as the read prompt."
     (end-of-defun)
     (let ((end (point)))
       (beginning-of-defun)
-      (chicken-op-dispatch 'eval
-                           (buffer-substring-no-properties (point) end)))))
+      (chicken-op-dispatch 'eval-last "region" nil (point) end))))
 
 (defun chicken-op-eval-sexp (sexp)
   "Eval SEXP string, i.e, send it to Chicken comint process."
   (interactive (chicken-op-thing-at-point 'sexp "Eval"))
   ;; eval string symbolic expression
-  (chicken-op-dispatch 'eval sexp t))
+  (chicken-op-dispatch 'eval "string" nil sexp))
 
 (defun chicken-op-eval-last-sexp ()
   "Send the previous sexp to the inferior process."
   (interactive)
   ;; send region of the last expression
-  (chicken-op-dispatch 'eval
-                       (buffer-substring-no-properties
-                        (save-excursion (backward-sexp) (point)) (point))
-                       t))
+  (chicken-op-dispatch 'eval-last "region" nil
+                       (save-excursion (backward-sexp) (point)) (point)))
 
 (defun chicken-op-eval-buffer ()
   "Eval current buffer."
@@ -134,22 +143,18 @@ If PROMPT is non-nil use it as the read prompt."
   (save-excursion
     (widen)
     (let ((case-fold-search t))
-      (chicken-op-dispatch 'eval
-                           (buffer-substring-no-properties (point-min)
-                                                           (point-max))
-                           t))))
+      (chicken-op-dispatch 'eval "region" nil (point-min) (point-max)))))
 
-(defun chicken-op-eval-region (start end)
-  "Eval region delimited by START/END."
+(defun chicken-op-eval-region (beg end)
+  "Eval BEG/END region."
   (interactive "r")
-  (let ((string (buffer-substring-no-properties start end)))
-    (chicken-op-dispatch 'eval string t)))
+  (chicken-op-dispatch 'eval "region" nil beg end))
 
 (defun chicken-op-import (library)
   "Import LIBRARY operation."
   (interactive (chicken-op-thing-at-point nil "Import"))
   ;; import operation
-  (chicken-op-dispatch 'import library t))
+  (chicken-op-dispatch 'import "string" nil library))
 
 (defvar chicken-op-prev-l/c-dir/file nil
   "Caches the last (directory . file) pair.")
@@ -173,7 +178,7 @@ considered a Chicken source file by `chicken-load-file'.")
         (cons (file-name-directory file-name)
               (file-name-nondirectory file-name)))
   ;; load file operation
-  (chicken-op-dispatch 'load file-name t))
+  (chicken-op-dispatch 'load "string" nil file-name))
 
 (defun chicken-op-compile-current-file ()
   "Compile current buffer file."
@@ -188,7 +193,7 @@ considered a Chicken source file by `chicken-load-file'.")
           (cons (file-name-directory file-name)
                 (file-name-nondirectory file-name)))
     ;; compile operation
-    (chicken-op-dispatch 'compile file-name t)))
+    (chicken-op-dispatch 'compile "string" nil file-name)))
 
 (defun chicken-op-load-current-file ()
   "Load current file."
@@ -197,43 +202,43 @@ considered a Chicken source file by `chicken-load-file'.")
     ;; load file operation
     (chicken-op-load-file file-name)))
 
-(defun chicken-op-toc (string)
-  "List contents (toc) of the given STRING."
+(defun chicken-op-toc (input)
+  "List contents (toc) of the given INPUT."
   (interactive (chicken-op-thing-at-point nil "Toc"))
   ;; ,toc operation
-  (chicken-op-dispatch 'toc string t))
+  (chicken-op-dispatch 'toc "string" nil input))
 
-(defun chicken-op-wtf (string)
-  "Send STRING to where-to-find operation."
+(defun chicken-op-wtf (input)
+  "Send INPUT string to where-to-find operation."
   (interactive (chicken-op-thing-at-point nil "Pattern"))
   ;; ,wtf operation
-  (chicken-op-dispatch 'wtf string t))
+  (chicken-op-dispatch 'wtf "string" nil input))
 
-(defun chicken-op-doc (string)
-  "Describe identifier (STRING) using the ,doc operation."
+(defun chicken-op-doc (input)
+  "Describe identifier INPUT (string) using the ,doc operation."
   (interactive (chicken-op-thing-at-point 'sexp "Doc"))
   ;; ,doc operation
-  (chicken-op-dispatch 'doc string t))
+  (chicken-op-dispatch 'doc "string" nil input))
 
-(defun chicken-op-doc-dwim (string)
-  "Send STRING to the selected `doc-dwin' operation."
+(defun chicken-op-doc-dwim (input)
+  "Send INPUT to the selected `doc-dwin' operation."
   (interactive (chicken-op-thing-at-point nil "Doc-dwim"))
   ;; doc-dwin operation
-  (chicken-op-dispatch 'doc-dwim string t))
+  (chicken-op-dispatch 'doc-dwim "string" nil input))
 
-(defun chicken-op-apropos (string)
-  "Send STRING to the selected `apropos' operation."
+(defun chicken-op-apropos (input)
+  "Send INPUT string to the selected `apropos' operation."
   (interactive (chicken-op-thing-at-point nil "Pattern"))
   ;; verify if the given/read string represents a quoted symbol
-  (let ((str (if (string-match "^'" string) string (format "%S" string))))
+  (let ((input (if (string-match "^'" input) input (format "%S" input))))
     ;; send apropos operation
-    (chicken-op-dispatch 'apropos str t)))
+    (chicken-op-dispatch 'apropos "string" nil input)))
 
-(defun chicken-op-trace (func)
-  "Trace the target FUNC (function)."
+(defun chicken-op-trace (input)
+  "Trace the target INPUT (function)."
   (interactive (chicken-op-thing-at-point 'symbol "Function"))
   ;; trace function operation
-  (chicken-op-dispatch 'trace func t))
+  (chicken-op-dispatch 'trace "string" nil input))
 
 (provide 'chicken-op)
 
